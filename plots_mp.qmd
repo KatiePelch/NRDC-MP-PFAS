@@ -1,0 +1,429 @@
+---
+title: "Exploratory plots: microplastics"
+execute:
+  echo: false
+  warning: false
+  message: false
+format:
+  pdf:
+    fig-height: 6
+    fig-width: 8
+---
+
+```{r setup}
+#| warning: FALSE
+#| message: FALSE
+library(here)
+library(tidyverse)
+```
+
+```{r}
+mp <- readRDS(file = here::here("out", "microplastics.rds"))
+```
+
+```{r}
+one.colour <- "#ea5e29"
+tap.colours <- c("#102345", "#f1c400")
+detect.colours <- c("#00aeef", "#bd1b21")
+spring.colours <- c("#E9A3BC", "#0F77A6")
+bottle.colours <- c("#00a3ad", "#92c90e")
+filtration.colours <- c("#00873e", "#6e3fa3")
+```
+
+```{r}
+mp.total <- mp %>%
+  group_by(id, category, 
+           bottle_material, source_type, adv_filtration) %>%
+  summarise(particles = sum(particles))
+mp.total <- mp.total %>%
+  mutate(nd = ifelse(particles == 0, 1, 0))
+mp.bottled <- mp %>%
+  filter(category == "Bottled")
+mp.bottled.pe <- mp.bottled %>%
+  filter(polymer == "PE")
+mp.bottled.pet <- mp.bottled %>%
+  filter(polymer == "PET")
+mp.bottled.total <- mp.total %>%
+  filter(category == "Bottled")
+```
+
+
+
+```{r}
+mp.polymer <- mp %>%
+  group_by(id, category, 
+           source_type, bottle_material, adv_filtration) %>%
+  summarise(
+    total_PE = sum(particles[polymer == "PE"], na.rm = TRUE),
+    total_PET = sum(particles[polymer == "PET"], na.rm = TRUE),
+    total_other = sum(particles[!(polymer %in% c("PE", "PET"))], na.rm = TRUE)
+  )
+mp.bottled.polymer <- mp.polymer %>%
+  filter(category == "Bottled")
+```
+
+## Comparing bottled and tap water
+
+```{r}
+ordered.names <- mp.total %>%
+  arrange(desc(category), particles) %>%
+  pull(id) %>%
+  unique()
+
+mp.category.plot.data <- mp.total %>%
+  mutate(name_ordered = factor(id, levels = ordered.names)) %>%
+  mutate(category_ordered = factor(category, levels = c("Municipal", "Bottled")))
+```
+
+```{r}
+category.plot <- ggplot(mp.category.plot.data, 
+       aes(x = name_ordered, 
+           y = particles, 
+           fill = category_ordered)) +
+  geom_col(width = 0.8) +
+  ylab("Particles/L") +
+  xlab("") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)) +
+  theme(panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank()) +
+  scale_fill_manual(name = NULL,
+                    values = c("Municipal" = tap.colours[1],
+                               "Bottled" = tap.colours[2])) +
+  facet_grid(. ~ category_ordered, scales = "free_x", space = "free")
+```
+
+```{r}
+print(category.plot)
+```
+
+```{r}
+#ggsave(category.plot, file = here::here("figures", "mp_category.png"))
+```
+
+
+```{r}
+mp.summary <- mp.total %>%
+  group_by(category) %>%
+  summarise(num.detect = sum(particles > 0),
+            num.zero = sum(particles == 0),
+            total = n())
+```
+
+```{r}
+mp.summary.long <- mp.summary %>%
+  pivot_longer(cols = num.detect:num.zero) %>%
+  mutate(name = case_when(
+         name == "num.detect" ~ "Detected",
+         name == "num.zero" ~ "Not detected")) %>%
+  mutate(name = factor(name, levels = c("Not detected", "Detected"))) %>%
+  mutate(percent = 100 * value/total) %>%
+  mutate(label = paste0(round(percent, 1), "% (", value, ")")) %>%
+  mutate(category_ordered = factor(category, levels = c("Municipal", "Bottled")))
+```
+
+
+```{r}
+detect.plot <- ggplot(mp.summary.long, 
+    aes(x = category_ordered, y = percent, fill = name)) +
+  geom_col(position = "dodge") +
+  geom_text(aes(label = label), 
+            position = position_dodge(width = 1),
+            vjust = -0.5,
+            size = 3) +
+  ylab("Percent of samples") +
+  xlab("") +
+  ylim(0, 100) +
+  theme_minimal() +
+  theme(panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank()) +
+  scale_fill_manual(name = "Microplastics\ndetected", 
+                    values = c("Not detected" = detect.colours[1],
+                               "Detected" = detect.colours[2]))
+```
+
+```{r}
+print(detect.plot)
+```
+
+```{r}
+#ggsave(detect.plot, file = here::here("figures", "mp_detect.png"))
+```
+
+
+
+## Bottled water polymer distribution
+
+```{r}
+mp.bottled.summary <- mp.bottled %>%
+  group_by(polymer) %>%
+  summarise(total = sum(particles)) %>%
+  mutate(percent = 100 * total / sum(total))
+```
+
+```{r}
+ordered.polymers <- mp.bottled.summary %>%
+  arrange(percent) %>%
+  pull(polymer) %>%
+  unique()
+
+mp.bottled.summary.plot.data <- mp.bottled.summary %>%
+  mutate(polymer_ordered = factor(polymer, levels = ordered.polymers)) %>%
+  mutate(percent_print = ifelse(percent == 0, "", paste0(round(percent), "%"))) %>%
+  filter(percent > 0)
+```
+
+```{r}
+polymer.plot <- ggplot(mp.bottled.summary.plot.data, 
+    aes(y = polymer_ordered, x = percent)) +
+  geom_col(fill = one.colour) +
+  coord_flip() +
+  geom_text(aes(label = percent_print, nudge_x = +2), size = 3) +
+  ylab("Polymer") + xlab("Percent of total particles") +
+  theme_minimal() +
+  theme(panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank())
+```
+
+```{r}
+print(polymer.plot)
+```
+
+```{r}
+#ggsave(polymer.plot, file = here::here("figures", "mp_polymer.png"))
+```
+
+## Comparing source type in bottled water
+
+```{r}
+ordered.names.particles <- mp.bottled.total %>%
+  arrange(source_type, particles) %>%
+  pull(id) %>%
+  unique()
+
+mp.bottled.source.plot.data <- mp.bottled.total %>%
+  mutate(name_ordered = factor(id, levels = ordered.names.particles))
+```
+
+```{r}
+source.plot <- ggplot(mp.bottled.source.plot.data, 
+       aes(x = name_ordered, 
+           y = particles, 
+           fill = source_type)) +
+  geom_col(width = 0.8) +
+  ylab("Particles/L") +
+  xlab("") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)) +
+  theme(panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank()) +
+  scale_fill_manual(name = "", 
+                      values = c("Non-spring" = spring.colours[1],
+                                 "Spring" = spring.colours[2]))  +
+  facet_grid(. ~ source_type, scales = "free_x", space = "free")
+```
+
+```{r}
+print(source.plot)
+```
+
+```{r}
+#ggsave(source.plot, file = here::here("figures", "mp_source.png"))
+```
+
+
+
+```{r}
+mp.bottled.polymer.plot.data <- mp.bottled.polymer %>%
+  rename(sample_name = id) %>%
+  pivot_longer(cols = starts_with("total")) %>%
+  mutate(polymer = case_when(
+    name == "total_PE" ~ "PE",
+    name == "total_PET" ~ "PET",
+    .default = "Other polymers")) %>%
+  mutate(polymer = factor(polymer, levels = c("PE", "PET", "Other polymers")))
+```
+
+```{r}
+mp.bottled.polymer.plot.data2.1 <- mp.bottled.polymer.plot.data %>%
+  mutate(sample_name_ordered = 
+         factor(sample_name, levels = ordered.names.particles))
+```
+
+
+```{r}
+source.polymer.plot <- ggplot(mp.bottled.polymer.plot.data2.1, 
+       aes(x = sample_name_ordered, 
+           y = value,
+           fill = source_type)) +
+  geom_col(width = 0.8) +
+  ylab("Particles/L") +
+  xlab("") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)) +
+  theme(panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank()) +
+  facet_grid(polymer ~ source_type, scales = "free_x", space = "free") +
+  scale_fill_manual(name = "", 
+                    values = c("Non-spring" = spring.colours[1],
+                               "Spring" = spring.colours[2])) +
+  theme(legend.position = "none")
+```
+
+```{r}
+#| fig.height: 8
+#| fig.width: 8
+print(source.polymer.plot)
+```
+
+```{r}
+#ggsave(source.polymer.plot, 
+#       file = here::here("figures", "mp_source_polymer.png"))
+```
+
+## Comparing bottle material in bottled water
+
+```{r}
+ordered.sample.names <- mp.bottled.total %>%
+  arrange(bottle_material, particles) %>%
+  pull(id) %>%
+  unique()
+
+mp.bottled.polymer.plot.data3.1 <- mp.bottled.polymer.plot.data %>%
+  mutate(sample_name_ordered = 
+         factor(sample_name, levels = ordered.sample.names))
+```
+
+```{r}
+bottle.plot <- ggplot(mp.bottled.polymer.plot.data3.1, 
+       aes(x = sample_name_ordered, 
+           y = value, 
+           fill = bottle_material)) +
+  geom_col(width = 0.8) +
+  ylab("Particles/L") +
+  xlab("") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)) +
+  theme(panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank()) +
+  scale_fill_manual(name = "", 
+                    values = c("PET" = bottle.colours[1],
+                               "HDPE" = bottle.colours[2]))  +
+  facet_grid(. ~ bottle_material, scales = "free_x", space = "free")
+```
+
+```{r}
+print(bottle.plot)
+```
+
+```{r}
+#ggsave(bottle.plot, 
+#       file = here::here("figures", "mp_bottle.png"))
+```
+
+```{r}
+bottle.polymer.plot <- ggplot(mp.bottled.polymer.plot.data3.1, 
+       aes(x = sample_name_ordered, 
+           y = value,
+           fill = bottle_material)) +
+  geom_col(width = 0.8) +
+  ylab("Particles/L") +
+  xlab("") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)) +
+  theme(panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank()) +
+  scale_fill_manual(name = "", 
+                    values = c("PET" = bottle.colours[1],
+                               "HDPE" = bottle.colours[2])) +
+  facet_grid(polymer ~ bottle_material, scales = "free_x", space = "free") + 
+  theme(legend.position = "none")
+```
+
+```{r}
+#| fig.height: 8
+#| fig.width: 8
+print(bottle.polymer.plot)
+```
+
+
+```{r}
+#ggsave(bottle.polymer.plot, 
+#       file = here::here("figures", "mp_bottle_polymer.png"))
+```
+
+
+  
+
+## Comparing advanced filtration in bottled water
+
+```{r}
+ordered.sample.names <- mp.bottled.total %>%
+  arrange(adv_filtration, particles) %>%
+  pull(id) %>%
+  unique()
+
+mp.bottled.polymer.plot.data4.1 <- mp.bottled.polymer.plot.data %>%
+  mutate(sample_name_ordered = 
+         factor(sample_name, levels = ordered.sample.names))
+```
+
+```{r}
+filtration.plot <- ggplot(mp.bottled.polymer.plot.data4.1, 
+       aes(x = sample_name_ordered, 
+           y = value, 
+           fill = adv_filtration)) +
+  geom_col(width = 0.8) +
+  ylab("Particles/L") +
+  xlab("") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)) +
+  theme(panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank()) +
+  scale_fill_manual(name = "", 
+                    values = c("Yes" = filtration.colours[1],
+                               "No" = filtration.colours[2])) +
+  facet_grid(. ~ adv_filtration, scales = "free_x", space = "free")
+```
+
+```{r}
+print(filtration.plot)
+```
+
+
+```{r}
+#ggsave(filtration.plot, 
+#       file = here::here("figures", "mp_filtration.png"))
+```
+
+```{r}
+filtration.polymer.plot <- ggplot(mp.bottled.polymer.plot.data4.1, 
+       aes(x = sample_name_ordered, 
+           y = value,
+           fill = adv_filtration)) +
+  geom_col(width = 0.8) +
+  ylab("Particles/L") +
+  xlab("") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)) +
+  theme(panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank()) +
+  scale_fill_manual(name = "", 
+                    values = c("Yes" = filtration.colours[1],
+                               "No" = filtration.colours[2])) +
+  facet_grid(polymer ~ adv_filtration, scales = "free_x", space = "free") + 
+  theme(legend.position = "none")
+```
+
+```{r}
+#| fig.height: 8
+#| fig.width: 8
+print(filtration.polymer.plot)
+```
+
+
+```{r}
+#ggsave(filtration.polymer.plot, 
+#       file = here::here("figures", "mp_filtration_polymer.png"))
+```
+

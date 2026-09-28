@@ -1,0 +1,484 @@
+---
+title: "Exploratory plots: PFAS"
+execute:
+  echo: false
+  warning: false
+  message: false
+format:
+  pdf:
+    fig-height: 6
+    fig-width: 8
+---
+
+```{r setup}
+#| warning: FALSE
+#| message: FALSE
+library(here)
+library(knitr)
+library(tidyverse)
+```
+
+```{r}
+pfas <- readRDS(file = here::here("out", "pfas.rds"))
+```
+
+```{r}
+one.colour <- "#ea5e29"
+tap.colours <- c("#14284b", "#f1c400")
+detect.colours <- c("#00aeef", "#bd1b21")
+spring.colours <- c("#E9A3BC", "#0F77A6")
+bottle.colours <- c("#00a3ad", "#92c90e")
+filtration.colours <- c("#00873e", "#6e3fa3")
+tfa.colours <- c("#ea5e29", "#3cb4de")
+analyte.colours <- unique(c(tap.colours, detect.colours, 
+                            spring.colours, bottle.colours,
+                            filtration.colours, tfa.colours, "#83203c"))
+```
+
+```{r}
+pfas <- pfas %>%
+  mutate(concentration = replace_na(concentration, 0))
+pfas.total <- pfas %>%
+  group_by(id, category, source_type, adv_filtration) %>%
+  summarise(concentration = sum(concentration)) %>%
+  mutate(nd = ifelse(concentration == 0, 1, 0))
+pfas.tfa <- pfas %>%
+  filter(analyte == "Trifluoroacetic acid")
+pfas.other <- pfas %>%
+  filter(analyte != "Trifluoroacetic acid")
+pfas.bottled <- pfas %>%
+  filter(category == "Bottled")
+pfas.bottled.total <- pfas.total %>%
+  filter(category == "Bottled")
+
+pfas.other.total <- pfas %>%
+  filter(analyte != "Trifluoroacetic acid") %>%
+  group_by(id, category, source_type, adv_filtration) %>%
+  summarise(concentration = sum(concentration))
+
+pfas.breakdown <- pfas.other.total %>%
+  mutate(analyte = "Other") %>%
+  relocate(analyte, .before = concentration) %>%
+  bind_rows(pfas.tfa %>% dplyr::select(
+    id, category, source_type, adv_filtration, analyte, concentration)
+  ) %>%
+  ungroup() %>%
+  arrange(id) %>%
+  mutate(analyte = as_factor(analyte)) %>%
+  mutate(analyte = fct_recode(analyte, "Other" = "Other", 
+                               "TFA" = "Trifluoroacetic acid"))
+```
+
+```{r}
+pfas.characteristics <- pfas.total %>%
+  group_by(category, source_type, adv_filtration) %>%
+  summarise(number_samples = n(), 
+            total_concentration = sum(concentration))
+
+pfas.other.characteristics <- pfas.other.total %>%
+  group_by(category, source_type, adv_filtration) %>%
+  summarise(number_samples = n(), 
+            number_detections = sum(concentration > 0))
+```
+
+## Comparing bottled and tap water
+
+```{r}
+ordered.names <- pfas.total %>%
+  arrange(desc(category), concentration) %>%
+  pull(id) %>%
+  unique()
+
+pfas.category.plot.data <- pfas.total %>%
+  mutate(name_ordered = factor(id, levels = ordered.names)) %>%
+  mutate(category_ordered = factor(category, levels = c("Municipal", "Bottled")))
+```
+
+```{r}
+category.plot <- ggplot(pfas.category.plot.data, 
+       aes(x = name_ordered, 
+           y = concentration, 
+           fill = category_ordered)) +
+  geom_col(width = 0.8) +
+  ylab("Concentration (ng/L)") +
+  xlab("") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)) +
+  theme(panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank()) +
+  scale_fill_manual(name = NULL,
+                    values = c("Municipal" = tap.colours[1],
+                               "Bottled" = tap.colours[2])) +
+  facet_grid(. ~ category_ordered, scales = "free_x", space = "free")
+```
+
+```{r}
+print(category.plot)
+```
+
+
+```{r}
+#ggsave(category.plot, file = here::here("figures", "pfas_category.png"))
+```
+
+```{r}
+pfas.category <- pfas.total %>%
+  group_by(category) %>%
+  summarise(num.detect = sum(concentration > 0),
+            num.zero = sum(concentration == 0),
+            total = n())
+```
+
+```{r}
+pfas.category.long <- pfas.category %>%
+  pivot_longer(cols = num.detect:num.zero) %>%
+  mutate(name = case_when(
+         name == "num.detect" ~ "Detected",
+         name == "num.zero" ~ "Not detected")) %>%
+  mutate(name = factor(name, levels = c("Not detected", "Detected"))) %>%
+  mutate(percent = 100 * value/total) %>%
+  mutate(label = paste0(round(percent, 1), "% (", value, ")")) %>%
+  mutate(category_ordered = factor(category, levels = c("Municipal", "Bottled")))
+```
+
+```{r}
+detect.plot <- ggplot(pfas.category.long, 
+       aes(x = category_ordered, y = percent, fill = name)) +
+  geom_col(position = "dodge") +
+  geom_text(aes(label = label), 
+            position = position_dodge(width = 1),
+            vjust = -0.5,
+            size = 3) +
+  ylab("Percent of samples") +
+  xlab("") +
+  ylim(0, 100) +
+  theme_minimal() +
+  theme(panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank()) +
+  scale_fill_manual(name = "PFAS\ndetected", 
+                    values = c("Not detected" = detect.colours[1],
+                               "Detected" = detect.colours[2]))
+```
+
+```{r}
+print(detect.plot)
+```
+
+
+```{r}
+#ggsave(detect.plot, file = here::here("figures", "pfas_detect.png"))
+```
+
+```{r}
+pfas.category.plot.data2 <- pfas.breakdown %>%
+  mutate(name_ordered = factor(id, levels = ordered.names)) %>%
+  mutate(analyte_ordered = 
+         factor(analyte, levels = c("Other", "TFA"))) %>%
+  mutate(category_ordered = 
+         factor(category, levels = c("Municipal", "Bottled")))
+```
+
+```{r}
+category.tfa.plot <- ggplot(pfas.category.plot.data2, 
+       aes(x = name_ordered, 
+           y = concentration, 
+           fill = analyte_ordered)) +
+  geom_col(width = 0.8) +
+  ylab("Concentration (ng/L)") +
+  xlab("") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)) +
+  theme(panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank()) +
+  scale_fill_manual(name = NULL,
+                    values = c("TFA" = tfa.colours[2],
+                               "Other" = tfa.colours[1])) +
+  facet_grid(. ~ category_ordered, scales = "free_x", space = "free")
+```
+
+```{r}
+print(category.tfa.plot)
+```
+
+
+```{r}
+#ggsave(category.tfa.plot, file = here::here("figures", "pfas_category_tfa.png"))
+```
+
+## Concentration of non-TFA analytes
+
+TFA comprises 99.6% of the sample. The remaining 0.4% is broken down into the following analytes.
+
+```{r}
+pfas.other.plot.data <- pfas.other %>%
+  filter(concentration != 0)
+  
+ordered.names <- pfas.other.plot.data %>%
+  group_by(id) %>%
+  summarise(total = sum(concentration)) %>%
+  arrange(total) %>%
+  pull(id) %>%
+  unique()
+
+pfas.other.plot.data <- pfas.other.plot.data %>%
+  mutate(name_ordered = factor(id, levels = ordered.names))
+```
+
+```{r}
+other.plot <- ggplot(pfas.other.plot.data, 
+       aes(x = name_ordered, 
+           y = concentration, 
+           fill = analyte_abbrv)) +
+  geom_col(width = 0.8) +
+  ylab("Concentration (ng/L)") +
+  xlab("") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)) +
+  theme(panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank()) +
+  scale_fill_manual(name = "", values = analyte.colours)
+```
+
+```{r}
+print(other.plot)
+```
+
+
+```{r}
+#ggsave(other.plot, file = here::here("figures", "pfas_other.png"))
+```
+
+
+{{< pagebreak >}}
+## Analyte distribution
+
+```{r}
+chain.length <- pfas.other %>%
+  dplyr::select(analyte_abbrv, chain_length) %>% 
+  distinct() %>%
+  filter(!is.na(chain_length))
+
+pfas.analyte <- pfas.other %>%
+  group_by(analyte_abbrv) %>%
+  summarise(total = sum(concentration, na.rm = TRUE)) %>%
+  filter(total > 0) %>%
+  mutate(percent = 100 * total / sum(total)) %>%
+  left_join(chain.length, join_by(analyte_abbrv))
+```
+
+```{r}
+ordered.analytes <- pfas.analyte %>%
+  mutate(name_print = paste0(analyte_abbrv, " (", chain_length, ")")) %>%
+  arrange(chain_length)
+
+ordered.name.print <- ordered.analytes %>% pull(name_print)
+ordered.analytes <- ordered.analytes %>% pull(analyte_abbrv)
+
+pfas.analyte.plot.data <- pfas.analyte %>%
+  mutate(analyte_ordered = factor(analyte_abbrv, levels = ordered.analytes),
+         percent_print = paste0(round(percent), "%"))
+```
+
+```{r}
+analyte.plot <- ggplot(pfas.analyte.plot.data, 
+       aes(y = analyte_ordered, x = percent)) +
+  geom_col(fill = one.colour) +
+  coord_flip() +
+  geom_text(aes(label = percent_print, nudge_x = +2), size = 3) +
+  ylab("") + xlab("Percent of non-TFA concentration") +
+  theme_minimal() +
+  theme(panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank()) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)) +
+  scale_y_discrete(labels = ordered.name.print) +
+  xlim(0, 100)
+```
+
+```{r}
+print(analyte.plot)
+```
+
+
+```{r}
+#ggsave(analyte.plot, file = here::here("figures", "pfas_analyte.png"))
+```
+
+
+## Comparing source type
+
+```{r}
+pfas.total.source <- pfas.total %>%
+  group_by(source_type) %>%
+  summarise(total = sum(concentration))
+
+ordered.names.concentration <- pfas.total %>%
+  arrange(source_type, concentration) %>%
+  pull(id) %>%
+  unique()
+
+pfas.source.plot.data <- pfas.total %>%
+  mutate(name_ordered = factor(id, levels = ordered.names.concentration))
+```
+
+```{r}
+source.plot <- ggplot(pfas.source.plot.data, 
+       aes(x = name_ordered, 
+           y = concentration, 
+           fill = source_type)) +
+  geom_col(width = 0.8) +
+  ylab("Concentration (ng/L)") +
+  xlab("") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)) +
+  theme(panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank()) +
+  scale_fill_manual(name = "", 
+                    values = c("Non-spring" = spring.colours[1],
+                               "Spring" = spring.colours[2]),
+                    drop = FALSE) +
+  facet_grid(. ~ source_type, scales = "free_x", space = "free")
+```
+
+```{r}
+print(source.plot)
+```
+
+```{r}
+#ggsave(source.plot, file = here::here("figures", "pfas_source.png"))
+```
+
+
+## Comparing source type among bottled water samples
+
+```{r}
+pfas.bottled.total.source <- pfas.bottled.total %>%
+  group_by(source_type) %>%
+  summarise(total = sum(concentration))
+
+ordered.names.concentration <- pfas.bottled.total %>%
+  arrange(source_type, concentration) %>%
+  pull(id) %>%
+  unique()
+
+pfas.bottled.source.plot.data <- pfas.bottled.total %>%
+  mutate(name_ordered = factor(id, levels = ordered.names.concentration))
+```
+
+```{r}
+source.bottled.plot <- ggplot(pfas.bottled.source.plot.data, 
+       aes(x = name_ordered, 
+           y = concentration, 
+           fill = source_type)) +
+  geom_col(width = 0.8) +
+  ylab("Concentration (ng/L)") +
+  xlab("") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)) +
+  theme(panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank()) +
+  scale_fill_manual(name = "", 
+                    values = c("Non-spring" = spring.colours[1],
+                               "Spring" = spring.colours[2]),
+                    drop = FALSE) +
+  facet_grid(. ~ source_type, scales = "free_x", space = "free")
+```
+
+```{r}
+print(source.bottled.plot)
+```
+
+```{r}
+#ggsave(source.bottled.plot, file = here::here("figures", "pfas_source_bottled.png"))
+```
+
+
+```{r}
+pfas.source <- pfas.bottled.total %>%
+  group_by(source_type) %>%
+  summarise(num.detect = sum(concentration > 0),
+            num.zero = sum(concentration == 0),
+            total = n())
+```
+
+```{r}
+pfas.source.long <- pfas.source %>%
+  pivot_longer(cols = num.detect:num.zero) %>%
+  mutate(name = case_when(
+         name == "num.detect" ~ "Detected",
+         name == "num.zero" ~ "Not detected")) %>%
+  mutate(name = factor(name, levels = c("Not detected", "Detected"))) %>%
+  mutate(percent = 100 * value/total) %>%
+  mutate(label = paste0(round(percent, 1), "% (", value, ")")) %>%
+  mutate(source_ordered = factor(source_type, levels = c("Non-spring", "Spring")))
+```
+
+```{r}
+detect.source.plot <- ggplot(pfas.source.long, 
+       aes(x = source_ordered, y = percent, fill = name)) +
+  geom_col(position = "dodge") +
+  geom_text(aes(label = label), 
+            position = position_dodge(width = 1),
+            vjust = -0.5,
+            size = 3) +
+  ylab("Percent of bottled samples") +
+  xlab("") +
+  ylim(0, 100) +
+  theme_minimal() +
+  theme(panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank()) +
+  scale_fill_manual(name = "PFAS\ndetected", 
+                    values = c("Not detected" = detect.colours[1],
+                               "Detected" = detect.colours[2]))
+```
+
+```{r}
+print(detect.source.plot)
+```
+
+
+```{r}
+#ggsave(detect.source.plot, file = here::here("figures", "pfas_source_detect.png"))
+```
+
+
+
+## Comparing advanced filtration
+
+```{r}
+ordered.names.concentration <- pfas.total %>%
+  arrange(adv_filtration, concentration) %>%
+  pull(id) %>%
+  unique()
+
+pfas.filt.plot.data <- pfas.total %>%
+  mutate(name_ordered = factor(id, levels = ordered.names.concentration))
+```
+
+```{r}
+filtration.plot <- ggplot(pfas.filt.plot.data, 
+       aes(x = name_ordered, 
+           y = concentration, 
+           fill = adv_filtration)) +
+  geom_col(width = 0.8) +
+  ylab("Concentration (ng/L)") +
+  xlab("") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)) +
+  theme(panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank()) +
+  scale_fill_manual(name = "", 
+                    values = c("Yes" = filtration.colours[1],
+                               "No" = filtration.colours[2])) +
+  facet_grid(. ~ adv_filtration, scales = "free_x", space = "free")
+```
+
+```{r}
+print(filtration.plot)
+```
+
+
+```{r}
+#ggsave(filtration.plot, 
+#       file = here::here("figures", "pfas_filtration.png"))
+```
+

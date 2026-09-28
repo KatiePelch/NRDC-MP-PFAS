@@ -1,0 +1,539 @@
+---
+title: "Microplastics results"
+execute:
+  echo: false
+  warning: false
+  message: false
+format:
+  pdf:
+    toc: true
+    fig-height: 6
+    fig-width: 8
+---
+
+```{r setup}
+#| warning: FALSE
+#| message: FALSE
+library(glmmTMB)
+library(here)
+library(tidyverse)
+```
+
+```{r}
+mp <- readRDS(file = here::here("out", "microplastics.rds"))
+```
+
+```{r}
+# total microplastics, summed across all polymers
+mp.total <- mp %>%
+  group_by(id, category, 
+           bottle_material, source_type, adv_filtration) %>%
+  summarise(particles = sum(particles)) %>%
+  mutate(nd = ifelse(particles == 0, 1, 0),
+         detect = ifelse(particles > 0, 1, 0))
+# bottled samples only
+mp.bottled <- mp %>%
+  filter(category == "Bottled") %>%
+  mutate(bottle_material = fct_drop(bottle_material))
+# PE polymer only
+mp.bottled.pe <- mp.bottled %>%
+  filter(polymer == "PE")
+# PET polymer only
+mp.bottled.pet <- mp.bottled %>%
+  filter(polymer == "PET") 
+# bottled samples, total MP
+mp.bottled.total <- mp.total %>%
+  filter(category == "Bottled") %>%
+  mutate(bottle_material = fct_drop(bottle_material))
+```
+
+```{r}
+# calculate the relative risk based on the OR and p0,
+# the probability of success for baseline category
+calc.rr <- function(or, p0)
+{
+  rr <- or / ( (1 - p0) + p0 * or)
+  return(round(rr, 2))
+}
+```
+
+# Microplastics
+
+## Total microplastics model
+
+```{r}
+model.mp.total <- readRDS(file = here::here("out", "model_mp_total.RDS"))
+summary(model.mp.total)
+```
+
+### Confidence intervals
+
+**Negative binomial components**
+
+```{r}
+conf.mp.total.nb <- confint(model.mp.total)[1:5,]
+conf.mp.total.nb <- exp(conf.mp.total.nb)
+print(round(conf.mp.total.nb, 2))
+```
+
+**Zero-inflated components**
+
+```{r}
+conf.mp.total.zeroinf <- confint(model.mp.total)[6:10,]
+conf.mp.total.zeroinf <- 1/exp(conf.mp.total.zeroinf)
+print(round(conf.mp.total.zeroinf, 2))
+```
+
+## Bottled model
+
+```{r}
+model.mp.bottled.total <- readRDS(file = here::here("out", "model_mp_bottled_total.RDS"))
+summary(model.mp.bottled.total)
+```
+
+### Confidence intervals
+
+**Negative binomial components**
+
+```{r}
+conf.mp.bottled.total.nb <- confint(model.mp.bottled.total)[1:4,]
+conf.mp.bottled.total.nb <- exp(conf.mp.bottled.total.nb)
+print(round(conf.mp.bottled.total.nb, 2))
+```
+
+**Zero-inflated components**
+
+```{r}
+conf.mp.bottled.total.zeroinf <- confint(model.mp.bottled.total)[5:8,]
+conf.mp.bottled.total.zeroinf <- 1/exp(conf.mp.bottled.total.zeroinf)
+print(round(conf.mp.bottled.total.zeroinf, 2))
+```
+
+## PE model
+
+```{r}
+model.mp.bottled.pe <- readRDS(file = here::here("out", "model_mp_bottled_pe.RDS"))
+summary(model.mp.bottled.pe)
+```
+
+### Confidence intervals
+
+**Negative binomial components**
+
+```{r}
+conf.mp.bottled.pe.nb <- confint(model.mp.bottled.pe)[1:4,]
+conf.mp.bottled.pe.nb <- exp(conf.mp.bottled.pe.nb)
+print(round(conf.mp.bottled.pe.nb, 2))
+```
+
+**Zero-inflated components**
+
+```{r}
+conf.mp.bottled.pe.zeroinf <- confint(model.mp.bottled.pe)[5:8,]
+conf.mp.bottled.pe.zeroinf <- 1/exp(conf.mp.bottled.pe.zeroinf)
+print(round(conf.mp.bottled.pe.zeroinf, 2))
+```
+
+## PET model
+
+```{r}
+model.mp.bottled.pet <- readRDS(file = here::here("out", "model_mp_bottled_pet.RDS"))
+summary(model.mp.bottled.pet)
+```
+
+### Confidence intervals
+
+**Negative binomial components**
+
+```{r}
+conf.mp.bottled.pet.nb <- confint(model.mp.bottled.pet)[1:4,]
+conf.mp.bottled.pet.nb <- exp(conf.mp.bottled.pet.nb)
+print(round(conf.mp.bottled.pet.nb, 2))
+```
+
+**Zero-inflated components**
+
+```{r}
+conf.mp.bottled.pet.zeroinf <- confint(model.mp.bottled.pet)[5:8,]
+conf.mp.bottled.pet.zeroinf <- 1/exp(conf.mp.bottled.pet.zeroinf)
+print(round(conf.mp.bottled.pet.zeroinf, 2))
+```
+
+
+# P-value adjustment
+
+```{r}
+#| echo: TRUE
+pvals.mp <- NULL
+# Conclusion 1
+# total model, category, zero inflated component
+pvals.mp[1] <- 0.0176
+# total model, category, conditional component
+pvals.mp[2] <- 0.00423
+# Conclusion 2
+# Fisher exact test
+pvals.mp[3] <- 1
+# bottled model, source type, conditional component
+pvals.mp[4] <- 0.726
+# Conclusion 3
+# bottled model, bottle material, zero inflated component
+pvals.mp[5] <- 0.591
+# bottled model, bottle material, conditional component
+pvals.mp[6] <- 7.67e-06
+# Conclusion 3, PE
+# bottled PE model, bottle material, zero inflated component
+pvals.mp[7] <- 0.102
+# bottled PE model, bottle material, conditional component
+pvals.mp[8] <- 0.00198
+# Conclusion 3, PET
+# bottled PET model, bottle material, zero inflated component
+pvals.mp[9] <- 0.816
+# bottled PET model, bottle material, conditional component
+pvals.mp[10] <- 0.00174
+# Conclusion 4
+# Fisher exact test
+pvals.mp[11] <- 0.5834
+# bottled model, filtration, conditional component
+pvals.mp[12] <- 0.293
+
+names(pvals.mp) <- c(
+  "Conclusion.mp1.1", "Conclusion.mp1.2",
+  "Conclusion.mp2.1", "Conclusion.mp2.2", 
+  "Conclusion.mp3.1", "Conclusion.mp3.2",
+  "Conclusion.mp3.3", "Conclusion.mp3.4",
+  "Conclusion.mp3.5", "Conclusion.mp3.6",
+  "Conclusion.mp4.1", "Conclusion.mp4.2"
+)
+```
+
+```{r}
+pvals.mp.adj <- p.adjust(pvals.mp, method = "BH")
+print(round(pvals.mp.adj, 2))
+```
+
+# Microplastics Writeup
+
+#### Conclusion 1: Bottled v. municipal
+
+```{r}
+# Conclusion 1
+# bottled/municipal
+mp.total.tap <- mp.total %>%
+  filter(category == "Municipal")
+
+p0 <- mean(mp.total.tap$particles > 0)
+```
+
+```{r}
+# Conclusion 1
+# bottled/municipal
+detect.or.est <- round(
+  conf.mp.total.zeroinf["zi.categoryBottled","Estimate"], 2)
+detect.or.low <- round(
+  conf.mp.total.zeroinf["zi.categoryBottled","97.5 %"], 2)
+detect.or.upp <- round(
+  conf.mp.total.zeroinf["zi.categoryBottled","2.5 %"], 2)
+detect.rr.est <- round(
+  calc.rr(conf.mp.total.zeroinf["zi.categoryBottled","Estimate"], p0), 2)
+detect.rr.low <- round(
+  calc.rr(conf.mp.total.zeroinf["zi.categoryBottled","97.5 %"], p0), 2)
+detect.rr.upp <- round(
+  calc.rr(conf.mp.total.zeroinf["zi.categoryBottled","2.5 %"], p0), 2)
+mean.est <- round(
+  conf.mp.total.nb["cond.categoryBottled","Estimate"], 2)
+mean.low <- round(
+  conf.mp.total.nb["cond.categoryBottled","2.5 %"], 2)
+mean.upp <- round(
+  conf.mp.total.nb["cond.categoryBottled","97.5 %"], 2)
+```
+
+Conclusion 1.1
+
+- The odds of any microplastic particles being detected in a bottled water sample is `r detect.or.est` times higher compared to municipal water (adjusted ratio: `r detect.or.est`, 95% interval for odds ratio: [`r detect.or.low`, `r detect.or.upp`]), keeping other sample characteristics fixed.
+  - Unadjusted p-value: 0.0176
+  - Adjusted p-value: `r round(pvals.mp.adj["Conclusion.mp1.1"], 2)`
+- With `r round(100 * p0)`% of municipal samples having microplastics detected, the probability of detection for bottled water is `r detect.rr.est` times higher than in municipal water (adjusted ratio: `r detect.rr.est`, adjusted ratio: `r detect.rr.est`, 95% interval for relative risk: [`r detect.rr.low`, `r detect.rr.upp`]).
+  - Unadjusted p-value: 0.0176
+  - Adjusted p-value: `r round(pvals.mp.adj["Conclusion.mp1.1"], 2)`
+  
+Conclusion 1.2
+
+- For samples with microplastic particles detected, the mean number of microplastic particles in a bottled water sample is `r mean.est` times higher compared to municipal water (adjusted ratio: `r mean.est`, 95% interval for multiplicative effect: [`r mean.low`, `r mean.upp`]).
+  - Unadjusted p-value: 0.00423
+  - Adjusted p-value: `r round(pvals.mp.adj["Conclusion.mp1.2"], 2)`
+
+- These results should be interpreted with caution due to the small number of samples. We can see the confidence intervals are wide, denoting a large amount of uncertainty. However, overall the evidence suggests bottled water has more microplastics than municipal water on average.
+
+#### Conclusion 2: Spring v. non-spring
+
+```{r}
+# Conclusion 2
+# spring/non-spring
+mp.bottled.total.nonspring <- mp.bottled.total %>%
+  filter(source_type == "Non-spring")
+
+p0 <- mean(mp.bottled.total.nonspring$particles > 0)
+```
+
+```{r}
+# Conclusion 2
+# spring/non-spring
+detect.or.est <- round(
+  conf.mp.bottled.total.zeroinf["zi.source_typeSpring","Estimate"], 2)
+detect.or.low <- round(
+  conf.mp.bottled.total.zeroinf["zi.source_typeSpring","97.5 %"], 2)
+detect.or.upp <- round(
+  conf.mp.bottled.total.zeroinf["zi.source_typeSpring","2.5 %"], 2)
+detect.rr.est <- round(calc.rr(
+  conf.mp.bottled.total.zeroinf["zi.source_typeSpring","Estimate"], p0), 2)
+detect.rr.low <- round(calc.rr(
+  conf.mp.bottled.total.zeroinf["zi.source_typeSpring","97.5 %"], p0), 2)
+detect.rr.upp <- round(calc.rr(
+  conf.mp.bottled.total.zeroinf["zi.source_typeSpring","2.5 %"], p0), 2)
+mean.est <- round(
+  conf.mp.bottled.total.nb["cond.source_typeSpring","Estimate"], 2)
+mean.low <- round(
+  conf.mp.bottled.total.nb["cond.source_typeSpring","2.5 %"], 2)
+mean.upp <- round(
+  conf.mp.bottled.total.nb["cond.source_typeSpring","97.5 %"], 2)
+```
+
+Conclusion 2.1
+
+- The zero-inflated portion of the model has really large standard errors, so the estimate and interval are not informative! If we were to use the zero-inflated model:
+  - Among bottled water samples only, the odds of any microplastic particles being   detected in a spring water sample is `r 100*(1 - detect.or.est)`% lower compared   to non-spring water (adjusted ratio: `r detect.or.est`, p-value: 0.07, 95%   interval for odds ratio: [`r detect.or.low`, `r detect.or.upp`]), keeping other   sample characteristics fixed.
+    - Unadjusted p-value: 0.998
+  - With `r round(100 * p0)`% of non-spring samples having microplastics detected, the probability of detection for spring water is `r 100*(1 - detect.rr.est)`% lower than in non-spring water (adjusted ratio: `r detect.rr.est`, 95% interval for relative risk: [`r detect.rr.low`, `r detect.rr.upp`]).
+    - Unadjusted p-value: 0.998
+- We instead consider an Exact Two-Sample Fisher-Pitman Permutation Test.
+  - Unadjusted p-value: 1
+  - Adjusted p-value: `r round(pvals.mp.adj["Conclusion.mp2.1"], 2)`
+  - The detection rate in spring water was `r round(100 * (mean(mp.bottled.total %>% filter(source_type == "Spring") %>% pull(detect))))` %.
+  - The detection rate in non-spring water was `r round(100 * (mean(mp.bottled.total %>% filter(source_type == "Non-spring") %>% pull(detect))))` %.
+
+Conclusion 2.2
+
+- For bottled water samples with microplastic particles detected, the mean number of microplastic particles in a spring water sample is `r 100 * (1 - mean.est)`% lower compared to non-spring water, but the difference is not significant (adjusted ratio: `r mean.est`, 95% interval for multiplicative effect: [`r mean.low`, `r mean.upp`]).
+  - Unadjusted p-value: 0.726
+  - Adjusted p-value: `r round(pvals.mp.adj["Conclusion.mp2.2"], 2)`
+- Overall, the evidence suggests there is little or no difference between spring and non-spring sources.
+
+#### Conclusion 3: Total MP, bottle material
+
+```{r}
+# Conclusion 3.1/3.2
+# bottle material: HDPE/PET
+# total microplastics
+# calculate baseline probability of success
+mp.bottled.total.pet <- mp.bottled.total %>%
+  filter(bottle_material == "PET")
+
+p0 <- mean(mp.bottled.total.pet$particles > 0)
+```
+
+```{r}
+# Conclusion 3.1/3.2
+# bottle material: HDPE/PET
+# total microplastics
+detect.or.est <- round(
+  conf.mp.bottled.total.zeroinf["zi.bottle_materialHDPE","Estimate"], 2)
+detect.or.low <- round(
+  conf.mp.bottled.total.zeroinf["zi.bottle_materialHDPE","97.5 %"], 2)
+detect.or.upp <- round(
+  conf.mp.bottled.total.zeroinf["zi.bottle_materialHDPE","2.5 %"], 2)
+detect.rr.est <- round(calc.rr(
+  conf.mp.bottled.total.zeroinf["zi.bottle_materialHDPE","Estimate"], p0), 2)
+detect.rr.low <- round(calc.rr(
+  conf.mp.bottled.total.zeroinf["zi.bottle_materialHDPE","97.5 %"], p0), 2)
+detect.rr.upp <- round(calc.rr(
+  conf.mp.bottled.total.zeroinf["zi.bottle_materialHDPE","2.5 %"], p0), 2)
+mean.est <- round(
+  conf.mp.bottled.total.nb["cond.bottle_materialHDPE","Estimate"], 2)
+mean.low <- round(
+  conf.mp.bottled.total.nb["cond.bottle_materialHDPE","2.5 %"], 2)
+mean.upp <- round(
+  conf.mp.bottled.total.nb["cond.bottle_materialHDPE","97.5 %"], 2)
+```
+
+Conclusion 3.1
+
+- The odds of any microplastic particles being detected in a HDPE bottle sample is `r detect.or.est` times higher compared to PET bottle samples (adjusted ratio: `r detect.or.est`, 95% interval for odds ratio: [`r detect.or.low`, `r detect.or.upp`]), keeping other sample characteristics fixed.
+  - Unadjusted p-value: 0.591
+  - Adjusted p-value: `r round(pvals.mp.adj["Conclusion.mp3.1"], 2)`
+- With `r round(100 * p0)`% of PET bottle samples having microplastics detected, the probability of detection for HDPE bottles is `r 100 * (detect.rr.est - 1)`% higher than in PET bottles (adjusted ratio: `r detect.rr.est`, 95% interval for relative risk: [`r detect.rr.low`, `r detect.rr.upp`]).
+  - Unadjusted p-value: 0.591
+  - Adjusted p-value: `r round(pvals.mp.adj["Conclusion.mp3.1"], 2)`
+  
+Conclusion 3.2
+
+- For samples with microplastic particles detected, the mean number of microplastic particles in HDPE bottles is `r mean.est` times higher compared to PET bottle samples (adjusted ratio: `r mean.est`, 95% interval for multiplicative effect: [`r mean.low`, `r mean.upp`]).
+  - Unadjusted p-value: 7.67e-06
+  - Adjusted p-value: `r round(pvals.mp.adj["Conclusion.mp3.2"], 2)`
+
+#### Conclusion 3: PE, bottle material
+
+```{r}
+# Conclusion 3.3/3.4
+# bottle material: HDPE/PET
+# PE microplastics
+mp.bottled.pe.hdpe <- mp.bottled.pe %>%
+  filter(bottle_material == "HDPE")
+
+p0 <- mean(mp.bottled.pe.hdpe$particles > 0)
+```
+
+```{r}
+# Conclusion 3.3/3.4
+# bottle material: HDPE/PET
+# PE microplastics
+detect.or.est <- round(
+  conf.mp.bottled.pe.zeroinf["zi.bottle_materialPET","Estimate"], 2)
+detect.or.low <- round(
+  conf.mp.bottled.pe.zeroinf["zi.bottle_materialPET","97.5 %"], 2)
+detect.or.upp <- round(
+  conf.mp.bottled.pe.zeroinf["zi.bottle_materialPET","2.5 %"], 2)
+detect.rr.est <- round(calc.rr(
+  conf.mp.bottled.pe.zeroinf["zi.bottle_materialPET","Estimate"], p0), 2)
+detect.rr.low <- round(calc.rr(
+  conf.mp.bottled.pe.zeroinf["zi.bottle_materialPET","97.5 %"], p0), 2)
+detect.rr.upp <- round(calc.rr(
+  conf.mp.bottled.pe.zeroinf["zi.bottle_materialPET","2.5 %"], p0), 2)
+mean.est <- round(
+  conf.mp.bottled.pe.nb["cond.bottle_materialPET","Estimate"], 2)
+mean.low <- round(
+  conf.mp.bottled.pe.nb["cond.bottle_materialPET","2.5 %"], 2)
+mean.upp <- round(
+  conf.mp.bottled.pe.nb["cond.bottle_materialPET","97.5 %"], 2)
+```
+
+Conclusion 3.3
+
+- The odds of any PE particles being detected in a PET bottle sample is `r 100 * (1 - detect.or.est)`% lower compared to HDPE bottle samples (adjusted ratio: `r detect.or.est`, 95% interval for odds ratio: [`r detect.or.low`, `r detect.or.upp`]).
+  - Unadjusted p-value: 0.102
+  - Adjusted p-value: `r round(pvals.mp.adj["Conclusion.mp3.3"], 2)`
+  - The difference is not significant.
+- With `r round(100 * p0)`% of HDPE bottle samples having PE microplastics detected, the probability of PE detection for PET bottles is `r 100 * (1 - detect.rr.est)`% lower than in HDPE bottles (adjusted ratio: `r detect.rr.est`, 95% interval for relative risk: [`r detect.rr.low`, `r detect.rr.upp`]).
+  - Unadjusted p-value: 0.102
+  - Adjusted p-value: `r round(pvals.mp.adj["Conclusion.mp3.3"], 2)`
+  - The difference is not significant.
+
+Conclusion 3.4
+
+- For samples with PE particles detected, the mean number of PE particles in PET bottles is `r 100*(1 - mean.est)` % lower compared to HDPE bottle samples (adjusted ratio: `r mean.est`, 95% interval for multiplicative effect: [`r mean.low`, `r mean.upp`]).
+  - Unadjusted p-value: 0.00198
+  - Adjusted p-value: `r round(pvals.mp.adj["Conclusion.mp3.4"], 2)`
+
+#### Conclusion 3: PET, bottle material
+
+```{r}
+# Conclusion 3.5/3.6
+# bottle material: HDPE/PET
+# PET microplastics
+mp.bottled.pet.hdpe <- mp.bottled.pet %>%
+  filter(bottle_material == "HDPE")
+
+p0 <- mean(mp.bottled.pet.hdpe$particles > 0)
+```
+
+```{r}
+# Conclusion 3.5/3.6
+# bottle material: HDPE/PET
+# PE microplastics
+detect.or.est <- round(
+  conf.mp.bottled.pet.zeroinf["zi.bottle_materialPET","Estimate"], 2)
+detect.or.low <- round(
+  conf.mp.bottled.pet.zeroinf["zi.bottle_materialPET","97.5 %"], 2)
+detect.or.upp <- round(
+  conf.mp.bottled.pet.zeroinf["zi.bottle_materialPET","2.5 %"], 2)
+detect.rr.est <- round(calc.rr(
+  conf.mp.bottled.pet.zeroinf["zi.bottle_materialPET","Estimate"], p0), 2)
+detect.rr.low <- round(calc.rr(
+  conf.mp.bottled.pet.zeroinf["zi.bottle_materialPET","97.5 %"], p0), 2)
+detect.rr.upp <- round(calc.rr(
+  conf.mp.bottled.pet.zeroinf["zi.bottle_materialPET","2.5 %"], p0), 2)
+mean.est <- round(
+  conf.mp.bottled.pet.nb["cond.bottle_materialPET","Estimate"], 2)
+mean.low <- round(
+  conf.mp.bottled.pet.nb["cond.bottle_materialPET","2.5 %"], 2)
+mean.upp <- round(
+  conf.mp.bottled.pet.nb["cond.bottle_materialPET","97.5 %"], 2)
+```
+
+Conclusion 3.5
+
+- The odds of any PET particles being detected in a PET bottle sample is `r 100*(1 - detect.or.est)`% lower compared to HDPE bottle samples (adjusted ratio: `r detect.or.est`, 95% interval for odds ratio: [`r detect.or.low`, `r detect.or.upp`]), keeping other sample characteristics fixed, but the difference is not significant.
+  - Unadjusted p-value: 0.816
+  - Adjusted p-value: `r round(pvals.mp.adj["Conclusion.mp3.5"], 2)`
+  - The difference is not significant.
+- With `r round(100 * p0)`% of HDPE bottle samples having microplastics detected, the probability of PET detection for PET bottles is `r 100*(1 - detect.rr.est)`% higher than in HDPE bottles (adjusted ratio: `r detect.rr.est`, 95% interval for relative risk: [`r detect.rr.low`, `r detect.rr.upp`]).
+  - Unadjusted p-value: 0.816
+  - Adjusted p-value: `r round(pvals.mp.adj["Conclusion.mp3.5"], 2)`
+  - The difference is not significant.
+  
+Conclusion 3.6
+
+- For samples with microplastic particles detected, the mean number of PET particles in PET bottles is `r 100 * (1 - mean.est)`% lower compared to HDPE bottle samples (adjusted ratio: `r mean.est`, 95% interval for multiplicative effect: [`r mean.low`, `r mean.upp`]).
+  - Unadjusted p-value: 0.00174
+  - Adjusted p-value: `r round(pvals.mp.adj["Conclusion.mp3.6"], 2)`
+
+**Summary**
+
+  - Overall, there is strong evidence HDPE bottle samples have more total microplastic particles on average compared to PET bottles. There is also evidence HDPE bottles have more PE and PET particles compared to PET bottles on average.
+
+
+#### Conclusion 4, advanced filtration
+
+```{r}
+# Conclusion 4
+# advanced/non-advanced
+mp.bottled.total.no <- mp.bottled.total %>%
+  filter(adv_filtration == "No")
+
+p0 <- mean(mp.bottled.total.no$particles > 0)
+```
+
+```{r}
+# Conclusion 2
+# spring/non-spring
+detect.or.est <- round(
+  conf.mp.bottled.total.zeroinf["zi.adv_filtrationYes","Estimate"], 2)
+detect.or.low <- round(
+  conf.mp.bottled.total.zeroinf["zi.adv_filtrationYes","97.5 %"], 2)
+detect.or.upp <- round(
+  conf.mp.bottled.total.zeroinf["zi.adv_filtrationYes","2.5 %"], 2)
+detect.rr.est <- round(calc.rr(
+  conf.mp.bottled.total.zeroinf["zi.adv_filtrationYes","Estimate"], p0), 2)
+detect.rr.low <- round(calc.rr(
+  conf.mp.bottled.total.zeroinf["zi.adv_filtrationYes","97.5 %"], p0), 2)
+detect.rr.upp <- round(calc.rr(
+  conf.mp.bottled.total.zeroinf["zi.adv_filtrationYes","2.5 %"], p0), 2)
+mean.est <- round(
+  conf.mp.bottled.total.nb["cond.adv_filtrationYes","Estimate"], 2)
+mean.low <- round(
+  conf.mp.bottled.total.nb["cond.adv_filtrationYes","2.5 %"], 2)
+mean.upp <- round(
+  conf.mp.bottled.total.nb["cond.adv_filtrationYes","97.5 %"], 2)
+```
+
+Conclusion 4.1
+
+- The zero-inflated portion of the model has really large standard errors, so the estimate and interval are not informative! If we were to use the zero-inflated model:
+  - Among bottled water samples only, the odds of any microplastic particles being detected in a sample with advanced filtration is `r 100*(1 -detect.or.est)`% lower compared to a sample without, keeping other sample characteristics fixed, but the difference is not significant (adjusted ratio: `r detect.or.est`, 95% interval for odds ratio: [`r detect.or.low`, `r detect.or.upp`]).
+    - Unadjusted p-value: 0.998
+  - With `r round(100 * p0)`% of samples without advanced filtration having microplastics detected, the probability of detection for samples with advanced filtration is `r 100*(1 -detect.or.est)`% lower than in samples without, but the difference is not significant (adjusted ratio: `r detect.rr.est`, p-value: 95% interval for relative risk: [`r detect.rr.low`, `r detect.rr.upp`]).
+    - Unadjusted p-value: 0.998
+- Instead we report the p-value from Exact Two-Sample Fisher-Pitman Permutation Test. 
+  - Unadjusted p-value: 0.5834
+  - Adjusted p-value: `r round(pvals.mp.adj["Conclusion.mp4.1"], 2)`
+  - The detection rate with advanced filtration was `r round(100 * (mean(mp.bottled.total %>% filter(adv_filtration == "Yes") %>% pull(detect))))` %.
+  - The detection rate without advanced filtration was `r round(100 * (mean(mp.bottled.total %>% filter(adv_filtration == "No") %>% pull(detect))))` %.
+  
+Conclusion 4.2
+
+- For samples with microplastic particles detected, the mean number of microplastic particles in a sample with advanced filtration is `r mean.est` times higher compared to a sample without, but the difference is not significant (adjusted ratio: `r mean.est`, 95% interval for multiplicative effect: [`r mean.low`, `r mean.upp`]).
+  - Unadjusted p-value: 0.293
+  - Adjusted p-value: `r round(pvals.mp.adj["Conclusion.mp4.2"], 2)`
+- Overall, the evidence suggests there is little or no difference between having advanced filtration or not.
+
+
+

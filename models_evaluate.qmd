@@ -1,0 +1,470 @@
+---
+title: "Models: Fitting and Evaluation"
+execute:
+  echo: false
+  warning: false
+  message: false
+format:
+  pdf:
+    toc: true
+    fig-height: 6
+    fig-width: 8
+---
+
+```{r setup}
+#| warning: FALSE
+#| message: FALSE
+library(coin)
+library(DHARMa)
+library(glmmTMB)
+library(here)
+library(tidyverse)
+```
+
+```{r}
+mp <- readRDS(file = here::here("out", "microplastics.rds"))
+pfas <- readRDS(file = here::here("out", "pfas.rds"))
+```
+
+# Microplastics
+
+```{r}
+# total microplastics, summed across all polymers
+mp.total <- mp %>%
+  group_by(id, category, bottle_material, source_type, adv_filtration) %>%
+  summarise(particles = sum(particles)) %>%
+  mutate(nd = ifelse(particles == 0, 1, 0),
+         detect = ifelse(particles > 0, 1, 0))
+# bottled samples only
+mp.bottled <- mp %>%
+  filter(category == "Bottled") %>%
+  mutate(bottle_material = fct_drop(bottle_material))
+# PE polymer only
+mp.bottled.pe <- mp.bottled %>%
+  filter(polymer == "PE")
+# PET polymer only
+mp.bottled.pet <- mp.bottled %>%
+  filter(polymer == "PET") 
+# bottled samples, total MP
+mp.bottled.total <- mp.total %>%
+  filter(category == "Bottled") %>%
+  mutate(bottle_material = fct_drop(bottle_material))
+```
+
+## Total model
+
+```{r}
+# make municipal the reference category
+mp.total <- mp.total %>%
+  mutate(category = fct_relevel(category, "Municipal", "Bottled"))
+
+model.mp.total <- glmmTMB(
+  particles ~ category + bottle_material + source_type + adv_filtration,
+  data = mp.total,
+  family = nbinom2(),
+  ziformula = ~ .,
+  na.action = na.omit
+)
+summary(model.mp.total)
+saveRDS(model.mp.total, file = here::here("out", "model_mp_total.RDS"))
+```
+
+### Model evaluation
+
+```{r}
+sim.mp.total <- DHARMa::simulateResiduals(model.mp.total)
+```
+
+```{r}
+#| fig.height: 5
+#| fig.width: 6
+plotQQunif(sim.mp.total)
+```
+
+```{r}
+#| fig.height: 5
+#| fig.width: 6
+plotResiduals(sim.mp.total)
+```
+
+```{r}
+#| fig.height: 5
+#| fig.width: 6
+plotResiduals(sim.mp.total, form = mp.total$category)
+```
+
+## Bottled model
+
+```{r}
+mp.bottled.total <- mp.bottled.total %>%
+  mutate(bottle_material = fct_relevel(bottle_material, "PET", "HDPE"))
+
+model.mp.bottled.total <- glmmTMB(
+  particles ~ bottle_material + source_type + adv_filtration,
+  data = mp.bottled.total,
+  family = nbinom2(),
+  ziformula = ~ .,
+  na.action = na.omit
+)
+summary(model.mp.bottled.total)
+saveRDS(model.mp.bottled.total, file = here::here("out", "model_mp_bottled_total.RDS"))
+```
+
+The large standard errors in the zero-inflated component are because source_type and adv_filtration are very collinear.
+
+```{r}
+table(mp.bottled.total$source_type, mp.bottled.total$adv_filtration)
+```
+
+```{r}
+table(mp.bottled.total$source_type, mp.bottled.total$particles > 100)
+```
+
+```{r}
+table(mp.bottled.total$adv_filtration, mp.bottled.total$particles > 100)
+```
+
+```{r}
+mp.bottled.total %>%
+  filter(particles > 100 & adv_filtration == "Yes")
+```
+
+So, we do not look at the zero-inflated portion of the model, as the estimates and inference are not reliable.
+
+We check that neither variable is significant on its own:
+
+```{r}
+model.mp.bottled.total1 <- glmmTMB(
+  particles ~ bottle_material + source_type,
+  data = mp.bottled.total,
+  family = nbinom2(),
+  ziformula = ~ .,
+  na.action = na.omit
+)
+summary(model.mp.bottled.total1)
+```
+
+```{r}
+model.mp.bottled.total2 <- glmmTMB(
+  particles ~ bottle_material + adv_filtration,
+  data = mp.bottled.total,
+  family = nbinom2(),
+  ziformula = ~ .,
+  na.action = na.omit
+)
+summary(model.mp.bottled.total2)
+```
+
+Because neither variable is significant in the zero-inflated component on its own, we are reasonably confident there is no difference in detection probability by either source type or advanced filtration. To report p-values, we instead report the Fisher exact test p-values, which don't control for other variables, as the p-values from the zero-inflated portion of the model are not reliable. See below for the Fisher exact tests.
+
+### Model evaluation
+
+```{r}
+sim.mp.bottled <- DHARMa::simulateResiduals(model.mp.bottled.total)
+```
+
+```{r}
+#| fig.height: 5
+#| fig.width: 6
+plotQQunif(sim.mp.bottled)
+```
+
+```{r}
+#| fig.height: 5
+#| fig.width: 6
+plotResiduals(sim.mp.bottled)
+```
+
+```{r}
+#| fig.height: 5
+#| fig.width: 6
+plotResiduals(sim.mp.bottled, form = mp.bottled.total$source_type)
+```
+
+```{r}
+#| fig.height: 5
+#| fig.width: 6
+plotResiduals(sim.mp.bottled, form = mp.bottled.total$adv_filtration)
+```
+
+### Fisher exact tests
+
+#### Probability of detection: source
+
+```{r}
+mean(mp.bottled.total %>% filter(source_type == "Spring") %>% pull(detect))
+mean(mp.bottled.total %>% filter(source_type == "Non-spring") %>% pull(detect))
+```
+
+```{r}
+table(mp.bottled.total$source_type, mp.bottled.total$detect)
+```
+
+```{r}
+coin::oneway_test(detect ~ factor(source_type), 
+                  data = mp.bottled.total, 
+                  distribution = "exact")
+```
+
+#### Probability of detection: bottle material
+
+```{r}
+table(mp.bottled.total$bottle_material, mp.bottled.total$detect)
+```
+
+```{r}
+coin::oneway_test(detect ~ factor(bottle_material), 
+                  data = mp.bottled.total, 
+                  distribution = "exact")
+```
+
+#### Probability of detection: advanced filtration
+
+```{r}
+mean(mp.bottled.total %>% filter(adv_filtration == "Yes") %>% pull(detect))
+mean(mp.bottled.total %>% filter(adv_filtration == "No") %>% pull(detect))
+```
+
+```{r}
+table(mp.bottled.total$adv_filtration, mp.bottled.total$source_type)
+```
+
+```{r}
+table(mp.bottled.total$adv_filtration, mp.bottled.total$detect)
+```
+
+```{r}
+coin::oneway_test(detect ~ factor(adv_filtration), 
+                  data = mp.bottled.total, 
+                  distribution = "exact")
+```
+
+
+## PE model
+
+```{r}
+mp.bottled.pe <- mp.bottled.pe %>%
+  mutate(bottle_material = fct_relevel(bottle_material, "HDPE", "PET"))
+
+model.mp.bottled.pe <- glmmTMB(
+  particles ~ bottle_material + source_type + adv_filtration, 
+  data = mp.bottled.pe,
+  family = nbinom2(),
+  ziformula = ~ .,
+  na.action = na.omit
+)
+summary(model.mp.bottled.pe)
+saveRDS(model.mp.bottled.pe, file = here::here("out", "model_mp_bottled_pe.RDS"))
+```
+
+### Model evaluation
+
+```{r}
+sim.mp.pe <- DHARMa::simulateResiduals(model.mp.bottled.pe)
+```
+
+```{r}
+#| fig.height: 5
+#| fig.width: 6
+plotQQunif(sim.mp.pe)
+```
+
+```{r}
+#| fig.height: 5
+#| fig.width: 6
+plotResiduals(sim.mp.pe)
+```
+
+```{r}
+#| fig.height: 5
+#| fig.width: 6
+plotResiduals(sim.mp.pe, form = mp.bottled.pe$source_type)
+```
+
+```{r}
+#| fig.height: 5
+#| fig.width: 6
+plotResiduals(sim.mp.pe, form = mp.bottled.pe$bottle_material)
+```
+
+```{r}
+#| fig.height: 5
+#| fig.width: 6
+plotResiduals(sim.mp.pe, form = mp.bottled.pe$adv_filtration)
+```
+
+## PET model
+
+```{r}
+mp.bottled.pet <- mp.bottled.pet %>%
+  mutate(bottle_material = fct_relevel(bottle_material, "HDPE", "PET"))
+
+model.mp.bottled.pet <- glmmTMB(
+  particles ~ source_type + bottle_material + adv_filtration, 
+  data = mp.bottled.pet,
+  family = nbinom2(),
+  ziformula = ~ .,
+  na.action = na.omit
+)
+summary(model.mp.bottled.pet)
+saveRDS(model.mp.bottled.pet, file = here::here("out", "model_mp_bottled_pet.RDS"))
+```
+
+
+### Model evaluation
+
+```{r}
+sim.mp.pet <- DHARMa::simulateResiduals(model.mp.bottled.pet)
+```
+
+```{r}
+#| fig.height: 5
+#| fig.width: 6
+plotQQunif(sim.mp.pet)
+```
+
+```{r}
+#| fig.height: 5
+#| fig.width: 6
+plotResiduals(sim.mp.pet)
+```
+
+```{r}
+#| fig.height: 5
+#| fig.width: 6
+plotResiduals(sim.mp.pet, form = mp.bottled.pet$bottle_material)
+```
+
+```{r}
+#| fig.height: 5
+#| fig.width: 6
+plotResiduals(sim.mp.pet, form = mp.bottled.pet$source_type)
+```
+
+```{r}
+#| fig.height: 5
+#| fig.width: 6
+plotResiduals(sim.mp.pet, form = mp.bottled.pet$adv_filtration)
+```
+
+# PFAS
+
+```{r}
+pfas <- pfas %>%
+  mutate(concentration = replace_na(concentration, 0))
+pfas.total <- pfas %>%
+  group_by(id, category, source_type, adv_filtration) %>%
+  summarise(concentration = sum(concentration)) %>%
+  mutate(nd = ifelse(concentration == 0, 1, 0),
+         detect = ifelse(concentration > 0, 1, 0))
+pfas.tfa <- pfas %>%
+  filter(analyte == "Trifluoroacetic acid")
+pfas.rest <- pfas %>%
+  filter(analyte != "Trifluoroacetic acid")
+pfas.bottled <- pfas %>%
+  filter(category == "Bottled")
+pfas.bottled.total <- pfas.total %>%
+  filter(category == "Bottled")
+```
+
+## Category and filtration
+
+```{r}
+model.pfas.total <- glmmTMB(
+  concentration ~ category + adv_filtration, 
+  data = pfas.total,
+  family = ziGamma(link = "log"),
+  ziformula = ~ .,
+  na.action = na.omit
+)
+summary(model.pfas.total)
+saveRDS(model.pfas.total, file = here::here("out", "model_pfas_total.RDS"))
+```
+
+### Model evaluation
+
+```{r}
+sim.pfas.total <- DHARMa::simulateResiduals(model.pfas.total)
+```
+
+```{r}
+#| fig.height: 5
+#| fig.width: 6
+plotQQunif(sim.pfas.total)
+```
+
+```{r}
+#| fig.height: 5
+#| fig.width: 6
+plotResiduals(sim.pfas.total)
+```
+
+```{r}
+#| fig.height: 5
+#| fig.width: 6
+plotResiduals(sim.pfas.total, form = pfas.total$category)
+```
+
+```{r}
+#| fig.height: 5
+#| fig.width: 6
+plotResiduals(sim.pfas.total, form = pfas.total$adv_filtration)
+```
+
+## Probability of detection: source
+
+```{r}
+pfas.source.prop <- pfas.bottled.total %>%
+  group_by(source_type) %>%
+  summarise(num.detect = sum(concentration > 0),
+            num.zero = sum(concentration == 0),
+            total = n()) %>%
+  mutate(percent = 100 * num.detect/total)
+print(pfas.source.prop)
+```
+
+```{r}
+coin::oneway_test(detect ~ factor(source_type), 
+                  data = pfas.bottled.total, 
+                  distribution = "exact")
+```
+
+#### Probability of detection: advanced filtration
+
+```{r}
+pfas.advfilt.prop <- pfas.bottled.total %>%
+  group_by(adv_filtration) %>%
+  summarise(num.detect = sum(concentration > 0),
+            num.zero = sum(concentration == 0),
+            total = n()) %>%
+  mutate(percent = 100 * num.detect/total)
+print(pfas.advfilt.prop)
+```
+
+```{r}
+table(pfas.bottled.total$adv_filtration, pfas.bottled.total$source_type)
+```
+
+```{r}
+coin::oneway_test(detect ~ factor(adv_filtration), 
+                  data = pfas.total, 
+                  distribution = "exact")
+```
+
+
+
+```{r}
+model.pfas.bottled.total <- glmmTMB(
+  concentration ~ adv_filtration, 
+  data = pfas.bottled.total,
+  family = ziGamma(link = "log"),
+  ziformula = ~ .,
+  na.action = na.omit
+)
+summary(model.pfas.bottled.total)
+#saveRDS(model.pfas.total, file = here::here("out", "model_pfas_total.RDS"))
+```
+
+```{r}
+table(pfas.bottled.total$adv_filtration, pfas.bottled.total$source_type)
+```

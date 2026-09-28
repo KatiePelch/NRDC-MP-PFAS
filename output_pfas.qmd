@@ -1,0 +1,236 @@
+---
+title: "PFAS results"
+execute:
+  echo: false
+  warning: false
+  message: false
+format:
+  pdf:
+    toc: true
+    fig-height: 6
+    fig-width: 8
+---
+
+```{r setup}
+#| warning: FALSE
+#| message: FALSE
+library(glmmTMB)
+library(here)
+library(tidyverse)
+```
+
+```{r}
+pfas <- readRDS(file = here::here("out", "pfas.rds"))
+```
+
+```{r}
+# calculate the relative risk based on the OR and p0,
+# the probability of success for baseline category
+calc.rr <- function(or, p0)
+{
+  rr <- or / ( (1 - p0) + p0 * or)
+  return(round(rr, 2))
+}
+```
+
+# PFAS
+
+```{r}
+# various transforms of the data
+pfas <- pfas %>%
+  mutate(concentration = replace_na(concentration, 0))
+pfas.total <- pfas %>%
+  group_by(id, category, source_type, adv_filtration) %>%
+  summarise(concentration = sum(concentration)) %>%
+  mutate(nd = ifelse(concentration == 0, 1, 0))
+pfas.tfa <- pfas %>%
+  filter(analyte == "Trifluoroacetic acid")
+pfas.rest <- pfas %>%
+  filter(analyte != "Trifluoroacetic acid")
+pfas.bottled <- pfas %>%
+  filter(category == "Bottled")
+pfas.bottled.total <- pfas.total %>%
+  filter(category == "Bottled")
+```
+
+## Category and filtration
+
+```{r}
+model.pfas.total <- readRDS(file = here::here("out", "model_pfas_total.RDS"))
+summary(model.pfas.total)
+```
+
+### Confidence intervals
+
+**Gamma components**
+
+```{r}
+conf.pfas.total.ga <- confint(model.pfas.total)[1:3,]
+conf.pfas.total.ga <- exp(conf.pfas.total.ga)
+print(round(conf.pfas.total.ga, 2))
+```
+
+**Zero-inflated components**
+
+```{r}
+conf.pfas.total.zeroinf <- confint(model.pfas.total)[4:6,]
+conf.pfas.total.zeroinf <- 1/exp(conf.pfas.total.zeroinf)
+print(round(conf.pfas.total.zeroinf, 2))
+```
+
+## Detection in spring sources
+
+```{r}
+pfas.bottled.total.prop <- pfas.bottled.total %>%
+  group_by(source_type) %>%
+  summarise(num.detect = sum(concentration > 0),
+            num.zero = sum(concentration == 0),
+            total = n()) %>%
+  mutate(percent = 100 * num.detect/total)
+print(pfas.bottled.total.prop)
+```
+
+
+```{r}
+coin::oneway_test(nd ~ factor(source_type), 
+                  data = pfas.bottled.total, 
+                  distribution = "exact")
+```
+
+
+## Conclusions
+
+```{r}
+#| echo: TRUE
+pvals.pfas <- NULL
+# Conclusion 1
+# category, zero inflated component
+pvals.pfas[1] <- 0.0278
+# category, conditional component
+pvals.pfas[2] <- 0.000835
+# Conclusion 2
+# source, fisher pitman
+pvals.pfas[3] <- 1.978e-07
+# Conclusion 3
+# advanced filtration, zero inflated component
+pvals.pfas[4] <- 0.0078
+# advanced filtration, conditional component
+pvals.pfas[5] <- 0.178101
+names(pvals.pfas) <- c(
+  "Conclusion.pfas1.1", "Conclusion.pfas1.2", 
+  "Conclusion.pfas2",
+  "Conclusion.pfas3.1", "Conclusion.pfas3.2"
+)
+```
+
+```{r}
+pvals.pfas.adj <- p.adjust(pvals.pfas, method = "BH")
+```
+
+```{r}
+print(round(pvals.pfas.adj, 2))
+```
+
+# PFAS Writeup
+
+#### Conclusion 1: Bottled v. municipal
+
+```{r}
+pfas.total.bottled <- pfas.total %>%
+  filter(category == "Bottled")
+
+p0 <- mean(pfas.total.bottled$concentration > 0)
+```
+
+```{r}
+# Conclusion 1
+# bottled/municipal
+detect.or.est <- round(
+  conf.pfas.total.zeroinf["zi.categoryMunicipal","Estimate"], 2)
+detect.or.low <- round(
+  conf.pfas.total.zeroinf["zi.categoryMunicipal","97.5 %"], 2)
+detect.or.upp <- round(
+  conf.pfas.total.zeroinf["zi.categoryMunicipal","2.5 %"], 2)
+detect.rr.est <- round(
+  calc.rr(conf.pfas.total.zeroinf["zi.categoryMunicipal","Estimate"], p0), 2)
+detect.rr.low <- round(
+  calc.rr(conf.pfas.total.zeroinf["zi.categoryMunicipal","97.5 %"], p0), 2)
+detect.rr.upp <- round(
+  calc.rr(conf.pfas.total.zeroinf["zi.categoryMunicipal","2.5 %"], p0), 2)
+mean.est <- round(
+  conf.pfas.total.ga["cond.categoryMunicipal","Estimate"], 2)
+mean.low <- round(
+  conf.pfas.total.ga["cond.categoryMunicipal","2.5 %"], 2)
+mean.upp <- round(
+  conf.pfas.total.ga["cond.categoryMunicipal","97.5 %"], 2)
+```
+
+**Conclusion 1**: 
+
+- The odds of any PFAS being detected in a municipal water sample is `r detect.or.est` times higher compared to bottled water (adjusted ratio: `r detect.or.est`, 95% interval: [`r detect.or.low`, `r detect.or.upp`]), keeping advanced filtration fixed. This confidence interval is quite wide.
+  - Unadjusted p-value: 0.0278
+  - Adjusted p-value: `r round(pvals.pfas.adj["Conclusion.pfas1.1"], 2)`
+- With `r round(100 * p0)`% of bottled samples having PFAS detected, the probability of detection for municipal water is  `r detect.rr.est` higher than in bottled water (adjusted ratio: `r detect.rr.est`, 95% interval for relative risk: [`r detect.rr.low`, `r detect.rr.upp`]).
+  - Unadjusted p-value: 0.0278
+  - Adjusted p-value: `r round(pvals.pfas.adj["Conclusion.pfas1.1"], 2)`
+- For samples with PFAS detected, the mean PFAS concentration in a municipal water sample is `r mean.est`  times higher compared to bottled water (adjusted ratio: `r mean.est`, 95% interval: [`r mean.low`, `r mean.upp`])).
+  - Unadjusted p-value: 0.000835
+  - Adjusted p-value: `r round(pvals.pfas.adj["Conclusion.pfas1.2"], 2)`
+- Overall, the evidence suggests municipal water has more PFAS compared to bottled water.
+
+#### Conclusion 2: Spring v. non-spring
+
+**Conclusion 2**: 
+
+- We want to compare spring and non-spring sources. However, this is a challenging task. There are no municipal sources from spring water. Thus, if I tell you a sample is spring water, you know it is definitely bottled water. This makes it hard to disentangle the effect of the source from whether a sample is from bottled or municipal water. Thus, I want to restrict to looking at spring v. non-spring source for bottled water only. However, this still remains challenging--among non-spring bottled water, all of them have no PFAS detected! So, I should not be looking at mean concentration comparing spring and non-spring sources, because so many samples have 0 concentration. Thus, we only compare whether the proportion of samples with PFAS detected is different among spring and non-spring sources among bottled water.
+- Among bottled water samples, the proportion of samples with PFAS detected is significantly higher in spring sources (85%, 23/27) compared to non-spring sources (0%, 0/13).
+  - Unadjusted p-value: 1.978e-07
+  - Adjusted p-value: `r round(pvals.pfas.adj["Conclusion.pfas2"], 2)`
+- There is strong evidence that in bottled water, spring sources are more likely to have PFAS detected.
+
+#### Conclusion 3, advanced filtration
+
+```{r}
+pfas.total.no <- pfas.total %>%
+  filter(adv_filtration == "No")
+
+p0 <- mean(pfas.total.no$concentration > 0)
+```
+
+```{r}
+# Conclusion 1
+# bottled/municipal
+detect.or.est <- round(
+  conf.pfas.total.zeroinf["zi.adv_filtrationYes","Estimate"], 2)
+detect.or.low <- round(
+  conf.pfas.total.zeroinf["zi.adv_filtrationYes","97.5 %"], 2)
+detect.or.upp <- round(
+  conf.pfas.total.zeroinf["zi.adv_filtrationYes","2.5 %"], 2)
+detect.rr.est <- round(
+  calc.rr(conf.pfas.total.zeroinf["zi.adv_filtrationYes","Estimate"], p0), 2)
+detect.rr.low <- round(
+  calc.rr(conf.pfas.total.zeroinf["zi.adv_filtrationYes","97.5 %"], p0), 2)
+detect.rr.upp <- round(
+  calc.rr(conf.pfas.total.zeroinf["zi.adv_filtrationYes","2.5 %"], p0), 2)
+mean.est <- round(
+  conf.pfas.total.ga["cond.adv_filtrationYes","Estimate"], 2)
+mean.low <- round(
+  conf.pfas.total.ga["cond.adv_filtrationYes","2.5 %"], 2)
+mean.upp <- round(
+  conf.pfas.total.ga["cond.adv_filtrationYes","97.5 %"], 2)
+```
+
+**Conclusion 3**: 
+
+- Among all samples, the odds of any PFAS being detected in a sample with advanced filtration is `r 100 * (1 - detect.or.est)`%  lower compared to a sample without, keeping category fixed (adjusted ratio: `r detect.or.est`, 95% interval for odds ratio: [`r detect.or.low`, `r detect.or.upp`]).
+  - Unadjusted p-value: 0.0078
+  - Adjusted p-value: `r round(pvals.pfas.adj["Conclusion.pfas3.1"], 2)`
+- With `r round(100 * p0)`% of samples without advanced filtration having microplastics detected, the probability of detection for samples with advanced filtration is `r 100 * (1 - detect.rr.est)`% lower than in samples without (adjusted ratio: `r detect.rr.est`, 95% interval for relative risk: [`r detect.rr.low`, `r detect.rr.upp`]).
+  - Unadjusted p-value: 0.0078
+  - Adjusted p-value: `r round(pvals.pfas.adj["Conclusion.pfas3.1"], 2)`
+- For samples with PFAS detected, the mean PFAS concentration in a sample with advanced filtration is `r mean.est` times higher compared to a sample without, but the difference is not significant (adjusted ratio: `r mean.est`, 95% interval for multiplicative effect: [`r mean.low`, `r mean.upp`]).
+  - Unadjusted p-value: 0.178101
+  - Adjusted p-value: `r round(pvals.pfas.adj["Conclusion.pfas3.2"], 2)`
+- Overall, the evidence suggests there is little or no difference between having advanced filtration or not.
+
+
