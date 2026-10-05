@@ -110,23 +110,11 @@ summary(model.mp.bottled.total)
 saveRDS(model.mp.bottled.total, file = here::here("out", "model_mp_bottled_total.RDS"))
 ```
 
-The large standard errors in the zero-inflated component are because source_type and adv_filtration are very collinear.
+The large standard errors in the zero-inflated component are because source_type and adv_filtration are very collinear. We can see in the below table that all samples with "Yes" for advanced filtration come from non-spring sources.
 
 ```{r}
+#| echo: TRUE
 table(mp.bottled.total$source_type, mp.bottled.total$adv_filtration)
-```
-
-```{r}
-table(mp.bottled.total$source_type, mp.bottled.total$particles > 100)
-```
-
-```{r}
-table(mp.bottled.total$adv_filtration, mp.bottled.total$particles > 100)
-```
-
-```{r}
-mp.bottled.total %>%
-  filter(particles > 100 & adv_filtration == "Yes")
 ```
 
 So, we do not look at the zero-inflated portion of the model, as the estimates and inference are not reliable.
@@ -208,8 +196,15 @@ coin::oneway_test(detect ~ factor(source_type),
 
 #### Probability of detection: bottle material
 
+
 ```{r}
-table(mp.bottled.total$bottle_material, mp.bottled.total$detect)
+mp.bottled.prop <- mp.bottled.total %>%
+  group_by(bottle_material) %>%
+  summarise(num.detect = sum(particles > 0),
+            num.zero = sum(particles == 0),
+            total = n()) %>%
+  mutate(percent = 100 * num.detect/total)
+print(mp.bottled.prop)
 ```
 
 ```{r}
@@ -367,11 +362,11 @@ pfas.bottled.total <- pfas.total %>%
   filter(category == "Bottled")
 ```
 
-## Category and filtration
+## Total model
 
 ```{r}
 model.pfas.total <- glmmTMB(
-  concentration ~ category + adv_filtration, 
+  concentration ~ category, 
   data = pfas.total,
   family = ziGamma(link = "log"),
   ziformula = ~ .,
@@ -405,13 +400,25 @@ plotResiduals(sim.pfas.total)
 plotResiduals(sim.pfas.total, form = pfas.total$category)
 ```
 
-```{r}
-#| fig.height: 5
-#| fig.width: 6
-plotResiduals(sim.pfas.total, form = pfas.total$adv_filtration)
-```
+## Bottled model
 
-## Probability of detection: source
+```{r}
+model.pfas.bottled.total <- glmmTMB(
+  concentration ~ source_type + adv_filtration, 
+  data = pfas.bottled.total,
+  family = ziGamma(link = "log"),
+  ziformula = ~ .,
+  na.action = na.omit
+)
+summary(model.pfas.bottled.total)
+saveRDS(model.pfas.bottled.total, 
+        file = here::here("out", "model_pfas_bottled_total.RDS"))
+```
+The model does not converge due to the collinearity of source type and advanced filtration. To report p-values, we instead report the Fisher exact test p-values, which don't control for other variables, as the p-values from the zero-inflated portion of the model are not reliable. See below for the Fisher exact tests.
+
+### Fisher exact tests
+
+#### Probability of detection: source
 
 ```{r}
 pfas.source.prop <- pfas.bottled.total %>%
@@ -449,22 +456,4 @@ table(pfas.bottled.total$adv_filtration, pfas.bottled.total$source_type)
 coin::oneway_test(detect ~ factor(adv_filtration), 
                   data = pfas.total, 
                   distribution = "exact")
-```
-
-
-
-```{r}
-model.pfas.bottled.total <- glmmTMB(
-  concentration ~ adv_filtration, 
-  data = pfas.bottled.total,
-  family = ziGamma(link = "log"),
-  ziformula = ~ .,
-  na.action = na.omit
-)
-summary(model.pfas.bottled.total)
-#saveRDS(model.pfas.total, file = here::here("out", "model_pfas_total.RDS"))
-```
-
-```{r}
-table(pfas.bottled.total$adv_filtration, pfas.bottled.total$source_type)
 ```
